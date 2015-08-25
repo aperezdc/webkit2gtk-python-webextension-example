@@ -1,0 +1,31 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+# vim:fenc=utf-8
+#
+# Copyright © 2015 Adrian Perez <aperez@igalia.com>
+#
+# Distributed under terms of the MIT license.
+
+from gi.repository import WebKit2, Gtk
+from os import path
+import sys
+
+mydir = path.abspath(path.dirname(__file__))
+print("Extension directory:", mydir)
+
+ctx = WebKit2.WebContext.get_default()
+ctx.set_web_extensions_directory(mydir)
+
+wnd = Gtk.Window()
+web = WebKit2.WebView.new_with_context(ctx)
+wnd.connect("destroy", Gtk.main_quit)
+wnd.add(web)
+wnd.set_default_size(1152, 800)
+wnd.show_all()
+
+if len(sys.argv) > 1:
+    web.load_uri(sys.argv[1])
+else:
+    web.load_uri("http://ddg.gg")
+
+Gtk.main()
