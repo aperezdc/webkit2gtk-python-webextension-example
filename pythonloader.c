@@ -30,6 +30,15 @@ webkit_web_extension_initialize_with_user_data (WebKitWebExtension *extension,
     g_printerr ("Python loader, extension=%p\n", extension);
 
     Py_Initialize ();
+
+#if PY_VERSION_HEX < 0x03000000
+    const char *argv[] = { "", NULL };
+#else
+    wchar_t *argv[] = { L"", NULL };
+#endif
+
+    PySys_SetArgvEx (1, argv, 0);
+
     pygobject_init (-1, -1, -1);
     if (PyErr_Occurred ()) {
         g_warning ("Could not initialize PyGObject");
