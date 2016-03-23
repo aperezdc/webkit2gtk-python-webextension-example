@@ -1,6 +1,7 @@
 /*
  * pythonloader.c
- * Copyright (C) 2015 Adrian Perez <aperez@igalia.com>
+ * Copyright (C) 2015-2016 Adrian Perez <aperez@igalia.com>
+ * Copyright (C) 2016 Nathan Hoad <nathan@getoffmalawn.com>
  *
  * Distributed under terms of the MIT license.
  */
@@ -24,7 +25,7 @@ py_object_cleanup(void *ptr)
 
 G_MODULE_EXPORT void
 webkit_web_extension_initialize_with_user_data (WebKitWebExtension *extension,
-                                                const GVariant     *user_data)
+                                                GVariant           *user_data)
 {
     g_printerr ("Python loader, extension=%p\n", extension);
 
@@ -70,9 +71,9 @@ webkit_web_extension_initialize_with_user_data (WebKitWebExtension *extension,
 
     PyObject py_auto *py_extension = pygobject_new (G_OBJECT (extension));
     PyObject py_auto *py_extra_args = pyg_boxed_new (G_TYPE_VARIANT,
-                                                     (gpointer) user_data,
-                                                     TRUE,
-                                                     TRUE);
+                                                     g_variant_ref (user_data),
+                                                     FALSE,
+                                                     FALSE);
 
     PyObject py_auto *py_func_args = PyTuple_New (2);
     PyTuple_SetItem (py_func_args, 0, py_extension);

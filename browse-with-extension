@@ -2,11 +2,12 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 #
-# Copyright © 2015 Adrian Perez <aperez@igalia.com>
+# Copyright (C) 2015-2016 Adrian Perez <aperez@igalia.com>
+# Copyright (C) 2016 Nathan Hoad <nathan@getoffmalawn.com>
 #
 # Distributed under terms of the MIT license.
 
-from gi.repository import WebKit2, Gtk
+from gi.repository import WebKit2, Gtk, GLib
 from os import path
 import sys
 
@@ -15,6 +16,7 @@ print("Extension directory:", mydir)
 
 ctx = WebKit2.WebContext.get_default()
 ctx.set_web_extensions_directory(mydir)
+ctx.set_web_extensions_initialization_user_data(GLib.Variant.new_string("test string"))
 
 wnd = Gtk.Window()
 web = WebKit2.WebView.new_with_context(ctx)
