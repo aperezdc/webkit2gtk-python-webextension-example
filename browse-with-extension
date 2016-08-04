@@ -7,6 +7,9 @@
 #
 # Distributed under terms of the MIT license.
 
+import gi
+gi.require_version("WebKit2", "4.0")
+
 from gi.repository import WebKit2, Gtk, GLib
 from os import path
 import sys
