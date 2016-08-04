@@ -28,6 +28,19 @@ wnd.add(web)
 wnd.set_default_size(1152, 800)
 wnd.show_all()
 
+def on_load_changed(webview, event):
+    if event == WebKit2.LoadEvent.FINISHED:
+        wnd.set_title(webview.get_title())
+    else:
+        wnd.set_title("Loading...  {:0.1f}%"
+                .format(webview.get_estimated_load_progress()))
+
+def on_load_failed(webview, event, url, error):
+    print("Error loading", url, "-", error)
+
+web.connect("load-changed", on_load_changed)
+web.connect("load-failed", on_load_failed)
+
 if len(sys.argv) > 1:
     web.load_uri(sys.argv[1])
 else:
