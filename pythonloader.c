@@ -8,7 +8,26 @@
 
 #include <webkit2/webkit-web-extension.h>
 #include <pygobject.h>
+#include <stdarg.h>
 
+/*
+ * XXX: Hacky workaround ahead!
+ *
+ * PyGObject internally uses _pygi_struct_new_from_g_type() to wrap
+ * GVariant instances into a gi.Struct, but the function is not in the
+ * public API. Instead, we temporarily wrap the GVariant into a GValue
+ * (ugh!), and use pyg_value_as_pyobject(), which in turn calls function
+ * pygi_value_to_py_structured_type() —also private—, and finally that
+ * in turn calls _pygi_struct_new_from_g_type() as initially desired.
+ */
+static PyObject*
+g_variant_to_pyobject (GVariant *variant)
+{
+    GValue value = { 0, };
+    g_value_init (&value, G_TYPE_VARIANT);
+    g_value_set_variant (&value, variant);
+    return pyg_value_as_pyobject (&value, FALSE);
+}
 
 #define py_auto __attribute__((cleanup(py_object_cleanup)))
 
@@ -23,7 +42,7 @@ py_object_cleanup(void *ptr)
 }
 
 
-#define PY_CHECK(expr, err_fmt, ...)              \
+#define PY_CHECK_ACT(expr, act, err_fmt, ...)     \
     do {                                          \
         if (!(expr)) {                            \
             g_printerr (err_fmt, ##__VA_ARGS__);  \
@@ -33,21 +52,56 @@ py_object_cleanup(void *ptr)
             } else {                              \
                 g_printerr (" (no error given)"); \
             }                                     \
-            return;                               \
+            act;                                  \
         }                                         \
     } while (0)
+
+#define PY_CHECK(expr, err_fmt, ...) \
+        PY_CHECK_ACT (expr, return, err_fmt, ##__VA_ARGS__)
 
 
 /* This would be "extension.py" from the source directory. */
 static const char *extension_name = "extension";
 
 
+static gboolean
+pygi_require (const gchar *module, ...)
+{
+    PyObject py_auto *gi_module = PyImport_ImportModule ("gi");
+    PY_CHECK_ACT (gi_module, return FALSE, "Could not import 'gi'");
+
+    PyObject py_auto *func = PyObject_GetAttrString (gi_module, "require_version");
+    PY_CHECK_ACT (func, return FALSE,
+                  "Could not obtain 'gi.require_version'");
+    PY_CHECK_ACT (PyCallable_Check (func), return FALSE,
+                  "Object 'gi.require_version' is not callable");
+
+    gboolean result = TRUE;
+    va_list arglist;
+    va_start (arglist, module);
+    while (module) {
+        /*
+         * For each module and version, call: gi.require(module, version)
+         */
+        const gchar *version = va_arg (arglist, const gchar*);
+        {
+            PyObject py_auto *args = Py_BuildValue ("(ss)", module, version);
+            PyObject py_auto *rval = PyObject_CallObject (func, args);
+            PY_CHECK_ACT (rval, result = FALSE; break,
+                          "Error calling 'gi.require_version(\"%s\", \"%s\")'",
+                          module, version);
+        }
+        module = va_arg (arglist, const gchar*);
+    }
+    va_end (arglist);
+    return result;
+}
+
+
 G_MODULE_EXPORT void
 webkit_web_extension_initialize_with_user_data (WebKitWebExtension *extension,
                                                 GVariant           *user_data)
 {
-    g_printerr ("Python loader: extension=%p\n", extension);
-
     Py_Initialize ();
 
 #if PY_VERSION_HEX < 0x03000000
@@ -67,33 +121,15 @@ webkit_web_extension_initialize_with_user_data (WebKitWebExtension *extension,
     pyg_enable_threads ();
     PyEval_InitThreads ();
 
-    PyObject py_auto *gi_module = PyImport_ImportModule ("gi");
-    PY_CHECK (gi_module, "Could not import 'gi'");
-    g_printerr ("Python loader: 'gi' module=%p\n", gi_module);
-
-    /* Call gi.require_version("WebKit2WebExtension", "4.0") */
-    {
-        PyObject py_auto *require_version_func =
-                PyObject_GetAttrString (gi_module, "require_version");
-        PY_CHECK (require_version_func,
-                  "Could not obtain 'gi.require_version'");
-        g_printerr ("Python loader: 'gi.require_version' object=%p\n", require_version_func);
-        PY_CHECK (PyCallable_Check (require_version_func),
-                  "Object 'gi.require_version' is not callable");
-        g_printerr ("Python loader: 'gi.require_version' is callable (good!)\n");
-
-        PyObject py_auto *func_args = Py_BuildValue ("(ss)", "WebKit2WebExtension", "4.0");
-        PyObject py_auto *retval = PyObject_CallObject (require_version_func, func_args);
-        PY_CHECK (retval, "Error calling 'gi.require_version'");
-        g_printerr ("Python loader: call 'gi.require_version(\"WebKit2WebExtension\", \"4.0\")' succeeded\n");
-    }
+    if (!pygi_require ("GLib", "2.0",
+                       "WebKit2WebExtension", "4.0",
+                       NULL))
+        return;
 
     PyObject py_auto *web_ext_module =
             PyImport_ImportModule ("gi.repository.WebKit2WebExtension");
     PY_CHECK (web_ext_module,
               "Could not import 'gi.repository.WebKit2WebExtension'");
-    g_printerr ("Python loader: 'gi.repository.WebKit2WebExtension' module=%p\n",
-                web_ext_module);
 
     /*
      * TODO: Instead of assuming that the Python import path contains the
@@ -108,23 +144,18 @@ webkit_web_extension_initialize_with_user_data (WebKitWebExtension *extension,
 
     PyObject py_auto *py_func = PyObject_GetAttrString (py_module, "initialize");
     PY_CHECK (py_func, "Could not obtain '%s.initialize'", extension_name);
-    g_printerr ("Python loader: '%s.initialize' object=%p\n", extension_name, py_func);
     PY_CHECK (PyCallable_Check (py_func),
               "Object '%s.initialize' is not callable", extension_name);
-    g_printerr ("Python loader: '%s.initialize' os callable (good!)\n", extension_name);
 
     PyObject py_auto *py_extension = pygobject_new (G_OBJECT (extension));
-    g_printerr ("Python loader: web extension object=%p\n", py_extension);
+    PyObject py_auto *py_extra_args = g_variant_to_pyobject (user_data);
 
-    PyObject py_auto *py_extra_args = pyg_boxed_new (G_TYPE_VARIANT,
-                                                     g_variant_ref (user_data),
-                                                     FALSE,
-                                                     FALSE);
-    g_printerr ("Python loader: initialization arguments object=%p\n", py_extra_args);
+    PY_CHECK (py_extra_args, "Cannot create GLib.Variant");
 
     PyObject py_auto py_auto *func_args = PyTuple_New (2);
     PyTuple_SetItem (func_args, 0, py_extension);
     PyTuple_SetItem (func_args, 1, py_extra_args);
+
     PyObject py_auto *py_retval = PyObject_CallObject (py_func, func_args);
     PY_CHECK (py_retval, "Error calling '%s.initialize'", extension_name);
 }
